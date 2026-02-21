@@ -1,15 +1,15 @@
 /**
  * @name FakeDeafen
  * @author arg0NNY
- * @version 1.4.0
- * @description Listen or talk in voice while self-deafened. Shows toggle icon next to Mute/Deafen.
+ * @version 1.5.0
+ * @description Listen or talk in voice while self-deafened. Toggle button always shows in Mute/Deafen row when in a voice channel.
  * @source https://github.com/arg0NNY/DiscordPlugin-FakeDeafen
  */
 
 module.exports = (_ => {
 	const changeLog = {
 		"fixed": [
-			"Updated plugin structure to fully support BDFDB without missing-library popups."
+			"Toggle button now always appears in Mute/Deafen row when in a voice channel."
 		]
 	};
 
@@ -49,10 +49,19 @@ module.exports = (_ => {
 				if (!VoicePanel) return;
 
 				BDFDB.PatchUtils.after(VoicePanel.prototype, "render", (_, args, res) => {
-					const children = res.props.children;
-					if (!children?.props?.children) return;
+					const channelId = BDFDB.DiscordModules.SelectedChannelStore.getVoiceChannelId();
+					if (!channelId) return; // only show button if in a voice channel
+
+					const children = res.props.children?.props?.children;
+					if (!children) return;
+
+					// Remove previous button if re-rendered
+					for (let i = 0; i < children.length; i++) {
+						if (children[i]?.key === "fakeDeafenToggle") children.splice(i, 1);
+					}
 
 					const btn = BDFDB.React.createElement("button", {
+						key: "fakeDeafenToggle",
 						className: "btn-1b6Oz0",
 						style: { marginRight: "6px" },
 						title: this.fixated ? "Disable Fake Mute/Deafen" : "Enable Fake Mute/Deafen",
@@ -68,7 +77,7 @@ module.exports = (_ => {
 						)
 					);
 
-					children.props.children.unshift(btn);
+					children.unshift(btn);
 				});
 			}
 
@@ -84,7 +93,7 @@ module.exports = (_ => {
 
 				this.fixated = status === null ? !this.fixated : status;
 
-				if (this.settings.sounds)
+				if (this.settings?.sounds)
 					BDFDB.LibraryModules.SoundUtils.playSound(this.fixated ? "ptt_start" : "ptt_stop");
 
 				if (this.fixated) this.hookWebsocket();
