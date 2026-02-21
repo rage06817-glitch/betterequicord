@@ -2,7 +2,7 @@
  * @name FakeDeafen
  * @author arg0NNY (updated by ChatGPT)
  * @version 1.1.0
- * @description Listen/talk in voice while self‑deafened (uses BDFDB)
+ * @description Listen/talk in voice while self-deafened. Assumes BDFDB is installed.
  */
 
 module.exports = (() => {
@@ -12,7 +12,7 @@ module.exports = (() => {
             name: "FakeDeafen",
             authors: [{ name: "arg0NNY" }],
             version: "1.1.0",
-            description: "Listen/talk in voice while self‑deafened.",
+            description: "Listen/talk in voice while self-deafened.",
             github: "https://github.com/arg0NNY/DiscordPlugin-FakeDeafen",
             github_raw: "https://raw.githubusercontent.com/arg0NNY/DiscordPlugin-FakeDeafen/main/FakeDeafen.plugin.js"
         },
@@ -22,125 +22,94 @@ module.exports = (() => {
         ]
     };
 
-    return !global.BDFDB ? class {
-        constructor() { this._config = config; }
-        getName() { return config.info.name; }
-        getAuthor() { return config.info.authors.map(a => a.name).join(", "); }
-        getDescription() { return config.info.description; }
-        getVersion() { return config.info.version; }
+    const { Plugin, Api } = BDFDB;
+    const { Toasts, DiscordModules, PatchUtils } = Api;
+    const VoiceInfo = DiscordModules.VoiceInfo;
+    const ChannelActions = DiscordModules.ChannelActions;
+    const SelectedChannelStore = DiscordModules.SelectedChannelStore;
 
-        load() {
-            BdApi.UI.showConfirmationModal(
-                "BDFDB Lib Missing",
-                `The plugin requires BDFDB to work. Click Download Now to install it.`,
-                {
-                    confirmText: "Download Now",
-                    cancelText: "Cancel",
-                    onConfirm: () => {
-                        require("request").get("https://github.com/mwittrien/BetterDiscordAddons/raw/master/Library/BDFDB.plugin.js", async (e, r, b) => {
-                            if (e) return require("electron").shell.openExternal("https://betterdiscord.app/Download?id=1");
-                            await new Promise(r => require("fs").writeFile(require("path").join(BdApi.Plugins.folder, "BDFDB.plugin.js"), b, r));
-                        });
-                    }
-                }
-            );
+    const Sounds = { ENABLE: "ptt_start", DISABLE: "ptt_stop" };
+
+    return class FakeDeafen extends Plugin {
+
+        onStart() {
+            this.fixated = false;
+            this.patchVoice();
+            this.injectButton();
         }
-        start() {}
-        stop() {}
-    } : (() => {
 
-        const { Plugin, Api } = BDFDB;
-        const { Toasts, DiscordModules, WebpackModules, ContextMenu, PatchUtils } = Api;
+        patchVoice() {
+            const preventStop = () => {
+                if (!this.fixated) return;
+                this.toggleFixate(false);
+                Toasts.warning("FakeDeafen disabled (left channel)");
+            };
 
-        const VoiceInfo = DiscordModules.VoiceInfo;
-        const ChannelActions = DiscordModules.ChannelActions;
-        const SelectedChannelStore = DiscordModules.SelectedChannelStore;
+            PatchUtils.before(ChannelActions, "disconnect", () => preventStop());
+            PatchUtils.before(ChannelActions, "selectVoiceChannel", () => preventStop());
+        }
 
-        const Sounds = { ENABLE: "ptt_start", DISABLE: "ptt_stop" };
+        injectButton() {
+            const VoicePanel = WebpackModules.find(m => m?.toString?.().includes("voice") && m.render && m.render.toString().includes("SELF_MUTE"));
+            if (!VoicePanel) return;
 
-        return class FakeDeafen extends Plugin {
+            PatchUtils.after(VoicePanel.prototype, "render", (_, args, res) => {
+                if (!this.settings.accountButton) return;
+                const btn = BDFDB.React.createElement("button", {
+                    className: "btn-1b6Oz0",
+                    style: { marginRight: "6px" },
+                    onClick: () => this.toggleFixate()
+                }, this.fixated ? "Disable Fake" : "Enable Fake");
+                res.props.children.unshift(btn);
+            });
+        }
 
-            onStart() {
-                this.fixated = false;
-                this.patchVoice();
-                this.injectButton();
+        toggleFixate(status = null) {
+
+            if ((!this.fixated || status === true) && !VoiceInfo.isMute() && !VoiceInfo.isDeaf())
+                return Toasts.error("Mute or Deaf yourself first.");
+
+            if (!SelectedChannelStore.getVoiceChannelId())
+                return Toasts.error("Connect to a voice channel first.");
+
+            this.fixated = status === null ? !this.fixated : status;
+
+            if (this.settings.sounds) {
+                BDFDB.LibraryModules.SoundUtils.playSound(this.fixated ? Sounds.ENABLE : Sounds.DISABLE);
             }
 
-            patchVoice() {
+            if (this.fixated) this.hookWebsocket();
+            else this.restoreWebsocket();
 
-                const preventStop = () => {
-                    if (!this.fixated) return;
-                    this.toggleFixate(false);
-                    Toasts.warning("FakeDeafen disabled (left channel)");
-                };
+            Toasts.info(`FakeDeafen ${this.fixated ? "enabled" : "disabled"}`);
+        }
 
-                PatchUtils.before(ChannelActions, "disconnect", () => preventStop());
-                PatchUtils.before(ChannelActions, "selectVoiceChannel", () => preventStop());
-            }
-
-            injectButton() {
-                const VoicePanel = WebpackModules.find(m => m?.toString?.().includes("voice") && m.render && m.render.toString().includes("SELF_MUTE"));
-                if (!VoicePanel) return;
-
-                PatchUtils.after(VoicePanel.prototype, "render", (_, args, res) => {
-                    if (!this.settings.accountButton) return;
-                    const btn = BDFDB.React.createElement("button", {
-                        className: "btn-1b6Oz0",
-                        style: { marginRight: "6px" },
-                        onClick: () => this.toggleFixate()
-                    }, this.fixated ? "Disable Fake" : "Enable Fake");
-                    res.props.children.unshift(btn);
-                });
-            }
-
-            toggleFixate(status = null) {
-
-                if ((!this.fixated || status === true) && !VoiceInfo.isMute() && !VoiceInfo.isDeaf())
-                    return Toasts.error("Mute or Deaf yourself first.");
-
-                if (!SelectedChannelStore.getVoiceChannelId())
-                    return Toasts.error("Connect to a voice channel first.");
-
-                this.fixated = status === null ? !this.fixated : status;
-
-                if (this.settings.sounds) {
-                    BDFDB.LibraryModules.SoundUtils.playSound(this.fixated ? Sounds.ENABLE : Sounds.DISABLE);
-                }
-
-                if (this.fixated) this.hookWebsocket();
-                else this.restoreWebsocket();
-
-                Toasts.info(`FakeDeafen ${this.fixated ? "enabled" : "disabled"}`);
-            }
-
-            hookWebsocket() {
-                const decoder = new TextDecoder("utf-8");
-                WebSocket.prototype._realSend = WebSocket.prototype.send;
-                WebSocket.prototype.send = function (data) {
-                    if (data instanceof ArrayBuffer) {
-                        const txt = decoder.decode(data);
-                        if (txt.includes("self_deaf") || txt.includes("self_mute")) {
-                            const fixed = txt.replace('"self_mute":false', '"self_mute":true');
-                            data = BDFDB.Buffer.from(fixed, "utf-8");
-                        }
+        hookWebsocket() {
+            const decoder = new TextDecoder("utf-8");
+            WebSocket.prototype._realSend = WebSocket.prototype.send;
+            WebSocket.prototype.send = function (data) {
+                if (data instanceof ArrayBuffer) {
+                    const txt = decoder.decode(data);
+                    if (txt.includes("self_deaf") || txt.includes("self_mute")) {
+                        const fixed = txt.replace('"self_mute":false', '"self_mute":true');
+                        data = BDFDB.Buffer.from(fixed, "utf-8");
                     }
-                    WebSocket.prototype._realSend.apply(this, [data]);
-                };
-            }
-
-            restoreWebsocket() {
-                if (WebSocket.prototype._realSend) {
-                    WebSocket.prototype.send = WebSocket.prototype._realSend;
                 }
+                WebSocket.prototype._realSend.apply(this, [data]);
+            };
+        }
+
+        restoreWebsocket() {
+            if (WebSocket.prototype._realSend) {
+                WebSocket.prototype.send = WebSocket.prototype._realSend;
             }
+        }
 
-            onStop() {
-                this.restoreWebsocket();
-                BDFDB.PatchUtils.unpatchAll();
-            }
+        onStop() {
+            this.restoreWebsocket();
+            BDFDB.PatchUtils.unpatchAll();
+        }
 
-        };
-
-    })();
+    };
 
 })();
