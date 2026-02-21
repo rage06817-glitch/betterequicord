@@ -1,8 +1,8 @@
 /**
  * @name FakeDeafen
- * @author arg0NNY (updated by ChatGPT)
- * @version 1.2.0
- * @description Listen/talk in voice while self-deafened. Shows toggle icon next to Mute/Deafen.
+ * @author arg0NNY (updated)
+ * @version 1.3.0
+ * @description Listen/talk in voice while self-deafened. Uses BDFDB; assumes it’s installed.
  */
 
 module.exports = (() => {
@@ -11,7 +11,7 @@ module.exports = (() => {
         info: {
             name: "FakeDeafen",
             authors: [{ name: "arg0NNY" }],
-            version: "1.2.0",
+            version: "1.3.0",
             description: "Listen/talk in voice while self-deafened with toggle icon.",
             github: "https://github.com/arg0NNY/DiscordPlugin-FakeDeafen",
             github_raw: "https://raw.githubusercontent.com/arg0NNY/DiscordPlugin-FakeDeafen/main/FakeDeafen.plugin.js"
@@ -22,15 +22,7 @@ module.exports = (() => {
         ]
     };
 
-    const { Plugin, Api } = BDFDB;
-    const { DiscordModules, Patcher, Toasts, WebpackModules, ReactTools } = Api;
-    const { VoiceInfo } = DiscordModules;
-    const ChannelActions = DiscordModules.ChannelActions;
-    const SelectedChannelStore = DiscordModules.SelectedChannelStore;
-
-    const Sounds = { ENABLE: "ptt_start", DISABLE: "ptt_stop" };
-
-    return class FakeDeafen extends Plugin {
+    return class FakeDeafen extends BDFDB.DiscordPlugins.Plugin {
 
         onStart() {
             this.fixated = false;
@@ -42,21 +34,20 @@ module.exports = (() => {
             const preventStop = () => {
                 if (!this.fixated) return;
                 this.toggleFixate(false);
-                Toasts.warning("FakeDeafen disabled (left channel)");
+                BDFDB.DiscordModules.Toasts.warning("FakeDeafen disabled (left channel)");
             };
 
-            Patcher.before(ChannelActions, "disconnect", () => preventStop());
-            Patcher.before(ChannelActions, "selectVoiceChannel", () => preventStop());
+            BDFDB.PatchUtils.before(BDFDB.DiscordModules.ChannelActions, "disconnect", () => preventStop());
+            BDFDB.PatchUtils.before(BDFDB.DiscordModules.ChannelActions, "selectVoiceChannel", () => preventStop());
         }
 
         injectToggleButton() {
-            // Get the React component that renders the Mute/Deafen buttons
-            const VoicePanel = WebpackModules.find(
+            const VoicePanel = BDFDB.WebpackModules.find(
                 m => m?.toString?.().includes("self_mute") && m?.default?.toString?.().includes("Voice")
             );
             if (!VoicePanel) return;
 
-            Patcher.after(VoicePanel.prototype, "render", (_, args, res) => {
+            BDFDB.PatchUtils.after(VoicePanel.prototype, "render", (_, args, res) => {
                 if (!this.settings.accountButton) return;
 
                 const children = res.props.children;
@@ -88,22 +79,22 @@ module.exports = (() => {
 
         toggleFixate(status = null) {
 
-            if ((!this.fixated || status === true) && !VoiceInfo.isMute() && !VoiceInfo.isDeaf())
-                return Toasts.error("Mute or Deaf yourself first.");
+            if ((!this.fixated || status === true) && !BDFDB.DiscordModules.VoiceInfo.isMute() && !BDFDB.DiscordModules.VoiceInfo.isDeaf())
+                return BDFDB.DiscordModules.Toasts.error("Mute or Deaf yourself first.");
 
-            if (!SelectedChannelStore.getVoiceChannelId())
-                return Toasts.error("Connect to a voice channel first.");
+            if (!BDFDB.DiscordModules.SelectedChannelStore.getVoiceChannelId())
+                return BDFDB.DiscordModules.Toasts.error("Connect to a voice channel first.");
 
             this.fixated = status === null ? !this.fixated : status;
 
             if (this.settings.sounds) {
-                BDFDB.LibraryModules.SoundUtils.playSound(this.fixated ? Sounds.ENABLE : Sounds.DISABLE);
+                BDFDB.LibraryModules.SoundUtils.playSound(this.fixated ? "ptt_start" : "ptt_stop");
             }
 
             if (this.fixated) this.hookWebsocket();
             else this.restoreWebsocket();
 
-            Toasts.info(`FakeDeafen ${this.fixated ? "enabled" : "disabled"}`);
+            BDFDB.DiscordModules.Toasts.info(`FakeDeafen ${this.fixated ? "enabled" : "disabled"}`);
         }
 
         hookWebsocket() {
@@ -122,14 +113,12 @@ module.exports = (() => {
         }
 
         restoreWebsocket() {
-            if (WebSocket.prototype._realSend) {
-                WebSocket.prototype.send = WebSocket.prototype._realSend;
-            }
+            if (WebSocket.prototype._realSend) WebSocket.prototype.send = WebSocket.prototype._realSend;
         }
 
         onStop() {
             this.restoreWebsocket();
-            Patcher.unpatchAll();
+            BDFDB.PatchUtils.unpatchAll();
         }
 
     };
